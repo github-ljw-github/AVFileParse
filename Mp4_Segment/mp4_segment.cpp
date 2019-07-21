@@ -961,7 +961,13 @@ long GetMvhdTimeScale(IN unsigned char* mvhd)
 	unsigned char* p = mvhd + (version == 0 ? 12 : 20);
 	return ReadInt32(p);
 }
-
+// get the duration of mvhd
+long GetMvhdDuration(OUT unsigned char* mvhd)
+{
+	int version = ReadInt8(mvhd);
+	unsigned char* p = mvhd + (version == 0 ? 16 : 24);
+	return ReadInt32(p);
+}
 // write the duration of mvhd
 void WriteMvhdDuration(OUT unsigned char* mvhd, IN long duration)
 {
@@ -1156,6 +1162,7 @@ unsigned int SeekMoov(unsigned char* moov_data, unsigned int size,
 			{
 				// fixup trak (duration);
 				unsigned int trak_duration = GetSttsDuration(stbl->stts_);
+				printf("moov_duration%d\n", moov_duration);
 				long trak_time_scale = GetMdhdTimeScale(trak->mdia_.mdhd_);
 				float trak_to_moov_time = (float)moov_time_scale / (float)trak_time_scale;
 				unsigned int duration = (long)((float)trak_duration * trak_to_moov_time);
@@ -1268,4 +1275,48 @@ bool mp4_segment(OUT mp4Buffer& outMp4, mp4Buffer& inMp4, float iStartTime, floa
 	memcpy(outMp4.m_pBuff, strOutBuff.c_str(), iOutSize);
 
 	return true;
+}
+
+float GetMp4PlayTimeSize(mp4Buffer& inMp4)
+{
+	unsigned char* mdat_start = NULL;
+	unsigned int mdat_size = 0;
+	unsigned char* moov_data = NULL;
+	unsigned int size = 10;
+	unsigned char* pBegin = inMp4.m_pBuff;
+	unsigned char* pData = pBegin;
+	unsigned char* pEnd = pBegin + inMp4.m_iSize;
+	while (pData < pEnd)
+	{
+		atom_t tempAtom;
+		pData = ReadHeader(pData, &tempAtom);
+		if (CompareType(&tempAtom, "moov"))
+		{
+			moov_data = pData;
+			size = tempAtom.size_ - ATOM_PREAMBLE_SIZE;
+		}
+		else if (CompareType(&tempAtom, "mdat"))
+		{
+			mdat_start = (unsigned char*)pData;
+			mdat_size = tempAtom.size_;
+		}
+		pData += tempAtom.size_ - ATOM_PREAMBLE_SIZE;
+	}
+	moov_t* moov = (moov_t *)malloc(sizeof(moov_t));
+	if(moov == NULL)
+	{
+		printf("malloc\n");
+		return 0;
+	}
+	InitMoov(moov);
+	if (!ParseMoov(moov, moov_data, size))
+	{
+		ClearMoov(moov);
+		free(moov);
+		return 0;
+	}
+	float Mp4PlayTimeSizeSecond = (1.0*GetMvhdDuration(moov->mvhd_)/GetMvhdTimeScale(moov->mvhd_));
+	free(moov);
+	//MP4 文件的总播放时长
+	return Mp4PlayTimeSizeSecond;
 }
